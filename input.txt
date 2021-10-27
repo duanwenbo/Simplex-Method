@@ -1,0 +1,10 @@
+type:
+"maximisation"  
+
+objective_function:
+"60x_1 + 90x_2 + 300x_3" 
+
+constraints:
+"x_1 + x_2 + x_3 <= 600"
+"x_1 + 3x_2 <= 600"
+"2x_1 + x_3 <= 900"

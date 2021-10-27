@@ -1,0 +1,19 @@
+
+############################ Question ############################
+type:
+"maximisation"  
+
+objective_function:
+"60x_1 + 90x_2 + 300x_3" 
+
+constraints:
+"x_1 + x_2 + x_3 <= 600"
+"x_1 + 3x_2 <= 600"
+"2x_1 + x_3 <= 900"
+
+############################ ANSWER ############################
+        x_1  x_2    x_3  s_1    s_2    s_3         z
+answer    0    0  600.0    0  600.0  300.0  180000.0
+where:
+original variables: x_1,x_2,x_3
+slack variables: s_1,s_2,s_3
