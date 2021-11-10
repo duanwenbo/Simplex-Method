@@ -58,11 +58,12 @@ def save_answer(answers):
         answer_1 = " , ".join(str(v) for v in solutions[0].values())
         answer_2 = " , ".join(str(v) for v in solutions[1].values())
         with open("solution.txt", "a+") as f:
-            f.write("\n\nTherefore, the final solution is\n({}) = C({}) + (1-C)({})\nIn which 0 < C < 1".format(variables_str, answer_1, answer_2))
+            f.write("\n\nTherefore, the final solution is\n({}) = C({}) + (1-C)({})\nIn which 0 <= C <= 1".format(variables_str, answer_1, answer_2))
     else:
          with open("solution.txt", "a+") as f:
             df = pd.DataFrame(answers[0], index=["answer"])
             f.write(str(df))
+            
     # inidcate the type of variables
     df = pd.DataFrame(answers[0], index=["answer"])
     variables = " ".join(list(df))

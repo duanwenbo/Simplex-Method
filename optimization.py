@@ -11,7 +11,7 @@ import numpy as np
 import re
 
 class LP_Solver:
-    def __init__(self, key_info):
+    def __init__(self, key_info:dict):
         self.constraints = key_info['constraints']
         self.objective_func = key_info['objective_function']
         self.type = key_info['optimization_type']
@@ -33,7 +33,7 @@ class LP_Solver:
                 coefficient = 0
         return(float(coefficient))
 
-    def slack_var(self) -> list:
+    def _slack_var(self) -> list:
         """
         change inequaity to equality
         """
@@ -50,6 +50,74 @@ class LP_Solver:
                 pass
             equality_constraints.append(constraint)
         return equality_constraints
+    
+    def _unit_vector(self, column:pd.DataFrame) -> bool:
+        """
+        determine if a column is an unit vector
+        This is used to 1. read the result; 2. determine the multiple optimal
+        """
+        modulus = np.linalg.norm(column.to_numpy())
+        if modulus != 1.:
+            return False
+        else:
+            return True
+
+    def _read_result(self, tableau:pd.DataFrame, objective_row:np.array) -> dict:
+        """
+        read one basic solution from the tableau
+        """
+        answer = {}
+        for index in range(tableau.shape[1]-1):
+            # check if the column is a unit vector
+            current_column = tableau.iloc[:, index]
+            if not self._unit_vector(current_column):
+                answer["{}".format(tableau.columns[index])] = 0
+            else:
+                answer_row = current_column[current_column==1.].index[0]
+                answer["{}".format(tableau.columns[index])] = tableau.iloc[answer_row,-1]
+        
+        # find the Z value according to the answer of independent variables
+        # reshape objective vector as 1x4 array
+        objective_vector = np.expand_dims(objective_row, axis=0)
+        # reshape answer vector as 4x1 array
+        answer_vector = np.array(list(answer.values()))
+        answer_vector = np.expand_dims(answer_vector, axis=1)
+        # Z = C^T * X
+        z = np.dot(objective_vector, answer_vector)[0][0]
+        answer['z'] = z
+        return answer
+    
+    def _multiple_optimal(self, tableau:pd.DataFrame) -> int:
+        """
+        Check if the tableau has multiple optimal
+        if yes, return the column index of the other pivot column
+        if no, return -1 as the flag of impossible
+        """
+        multiple_optimal_index = -1
+        # if it has non-basic variables
+        if len(self.non_basic_var_column) != 0:
+            # check if the indicator of this non-basic var is 1 
+            # (condition of multiple optimal)
+            for index, column in enumerate(self.non_basic_var_column):
+                if tableau.iloc[-1,column] == 0:
+                    multiple_optimal_index = column
+                    del self.non_basic_var_column[index]
+        return multiple_optimal_index
+
+
+    def _detect_non_basic_vars(self, tableau:pd.DataFrame) -> list:
+        """
+        Detect the position of non-basic variables in the tableau
+        This is used for finding the multiple optimal on non-basic var column later
+        """
+        variables = list(tableau)
+        key_var_num = len(list(filter(lambda var: re.search(r'x', var) , variables)))
+        non_basic_vars_index = []
+        for index in range(key_var_num):
+            current_column = tableau.iloc[:,index]
+            if not self._unit_vector(current_column):
+                non_basic_vars_index.append(index)
+        return non_basic_vars_index
     
     @record_process
     def tableau (self, equality_constraints:list) -> pd.DataFrame:
@@ -87,12 +155,9 @@ class LP_Solver:
     @record_process
     def single_pivot(self, tableau:pd.DataFrame, multi_opt_index:int):
         def _pivot_column() -> int:
-            # determine which column to be pivoted
+            # pivot on the column with the most negative element
             objective_row = tableau.iloc[-1].to_numpy()
-
             pivot_column = np.argsort(objective_row)[0]
-
-            # pivot_column, = np.where(np.argsort(objective_row) == 0)[0]
             return pivot_column
         
         def _pivot_row(pivot_column:int) -> int:
@@ -103,7 +168,6 @@ class LP_Solver:
             negative_num = len([i for i in tableau['ratio'].to_list() if i < 0])
             # the final target is the index of smallest positive number in this column
             picking_position = default_picking_position + negative_num
-            #pivot_row, = np.where(np.argsort(tableau['ratio'].to_numpy()) == picking_position)[0]
             pivot_row = np.argsort(tableau['ratio'].to_numpy())[picking_position]
             return pivot_row
 
@@ -111,11 +175,11 @@ class LP_Solver:
             column_index = _pivot_column()
         else:
             column_index = multi_opt_index
-
         row_index = _pivot_row(column_index)
+        
         tableau = tableau.drop(columns=['ratio'])
         pivot_key = tableau.iloc[row_index, column_index]
-        # check if the pivot_key is back to 1
+        # check if the pivot_key is unit 1
         if pivot_key != 1.:
             tableau.iloc[row_index,:] = (tableau.iloc[row_index,:] / pivot_key)
 
@@ -135,78 +199,12 @@ class LP_Solver:
                 done = True 
         return tableau, done
     
-    def _unit_vector(self, column:pd.DataFrame):
-        """
-        determine if a column is an unit vector
-        This is used to 1. read the result; 2. determine the multiple optimal
-        """
-        modulus = np.linalg.norm(column.to_numpy())
-        if modulus != 1.:
-            return False
-        else:
-            return True
-    
-    def read_result(self, tableau:pd.DataFrame, objective_row:np.array):
-        answer = {}
-        for index in range(tableau.shape[1]-1):
-            # check if the column is a unit vector
-            current_column = tableau.iloc[:, index]
-            if not self._unit_vector(current_column):
-                answer["{}".format(tableau.columns[index])] = 0
-            else:
-                answer_row = current_column[current_column==1.].index[0]
-                answer["{}".format(tableau.columns[index])] = tableau.iloc[answer_row,-1]
-        
-        # find the Z value according to the answer of independent variables
-        # reshape objective vector as 1x4 array
-        objective_vector = np.expand_dims(objective_row, axis=0)
-        # reshape answer vector as 4x1 array
-        answer_vector = np.array(list(answer.values()))
-        answer_vector = np.expand_dims(answer_vector, axis=1)
-        # Z = C^T * X
-        z = np.dot(objective_vector, answer_vector)[0][0]
-        answer['z'] = z
-        return answer
-    
-    def _multiple_optimal(self, tableau:pd.DataFrame):
-        """
-        Check if the tableau has multiple optimal
-        if yes, return the column index of the other pivot column
-        if no, return -1 as the flag of impossible
-        """
-        multiple_optimal_index = -1
-        # if it has non-basic variables after one optimal found
-        if len(self.non_basic_var_column) != 0:
-            # check if the indicator of this non-basic var is 1 
-            # (condition of multiple optimal)
-            for index, column in enumerate(self.non_basic_var_column):
-                if tableau.iloc[-1,column] == 0:
-                    multiple_optimal_index = column
-                    del self.non_basic_var_column[index]
-        return multiple_optimal_index
-
-
-    def _detect_non_basic_vars(self, tableau:pd.DataFrame) -> list:
-        """
-        Detect the position of non-basic variables in the tableau
-        This is used for finding the multiple optimal on non-basic var column later
-        """
-        variables = list(tableau)
-        key_var_num = len(list(filter(lambda var: re.search(r'x', var) , variables)))
-        non_basic_vars_index = []
-        for index in range(key_var_num):
-            current_column = tableau.iloc[:,index]
-            if not self._unit_vector(current_column):
-                non_basic_vars_index.append(index)
-        return non_basic_vars_index
-
-    
     def solve(self):
         """
         main function to execute algorithm
         """
         answers = []
-        equality_constraints = self.slack_var()
+        equality_constraints = self._slack_var()
         tableau = self.tableau(equality_constraints)
         objective_row = (tableau.iloc[-1,:-1]*-1).to_numpy()
         done = False
@@ -225,12 +223,13 @@ class LP_Solver:
                 multi_opt_flag = self._multiple_optimal(tableau)
                 if multi_opt_flag >= 0:
                     # case2: if multiple optimal detected, continue pivoting
-                    answers.append(self.read_result(tableau, objective_row))
+                    answers.append(self._read_result(tableau, objective_row))
                     done = False
-        answers.append(self.read_result(tableau,objective_row))
+        answers.append(self._read_result(tableau,objective_row))
         save_answer(answers)
         print("finished!")
-     
+
+
 if __name__ == "__main__":
     path = "input.txt"
     info = extract_info(input_path=path)
