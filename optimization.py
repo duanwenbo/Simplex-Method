@@ -9,6 +9,7 @@ from utils import record_process, save_answer
 import pandas as pd
 import numpy as np
 import re
+import copy
 
 class LP_Solver:
     def __init__(self, key_info:dict):
@@ -16,6 +17,7 @@ class LP_Solver:
         self.objective_func = key_info['objective_function']
         self.type = key_info['optimization_type']
         self.non_basic_var_column = []  # for multiple opt use
+        self.inital_tableau = ""  # contains objective function info
     
     def _read_coefficient(self, constraint:str, key_variable:str) -> float:
         """
@@ -26,9 +28,11 @@ class LP_Solver:
             coefficient = re.search(r'(?<=\=).*$', constraint).group()
         else:
             if re.search(key_variable, constraint):
-                coefficient = re.search(r'\d*\.?\d*?(?={})'.format(key_variable), constraint).group()
+                coefficient = re.search(r'-*?\d*\.?\d*?(?={})'.format(key_variable), constraint).group()
                 if coefficient == "":
                     coefficient = 1
+                elif coefficient == "-":
+                    coefficient = -1
             else:
                 coefficient = 0
         return(float(coefficient))
@@ -44,17 +48,76 @@ class LP_Solver:
                 constraint = re.sub(r'\<', "+ s_{}".format(inequality_count), constraint)
                 inequality_count += 1
             elif re.search(r'\>', constraint):
-                constraint = re.sub(r'\<', "- s_{}".format(inequality_count), constraint)
+                constraint = re.sub(r'\>', "- s_{}".format(inequality_count), constraint)
                 inequality_count += 1
             else:
                 pass
             equality_constraints.append(constraint)
         return equality_constraints
     
+    @record_process
+    def _artificial_vars(self, tableau:pd.DataFrame):
+
+        @record_process
+        def _positive_sol(negative_row:int, tableau:pd.DataFrame):
+            # ensure the solution column is positive, try to find an initial feasiable solution 
+            tableau.iloc[negative_row,:] *= -1
+            return tableau
+        
+        # check if the initial tabeau is sufficient or not to get a feasible solution
+        def _detect_sufficiency(tableau:pd.DataFrame):
+            # find if the solution column contains negative or not
+            negative_sol_index = []
+            for index, num in enumerate(tableau.solution.to_list()):
+                if num < 0:
+                    negative_sol_index.append(index)
+            # if it contains, regulate the related solution to positive
+            if len(negative_sol_index) > 0:
+                for index in negative_sol_index:
+                    tableau = _positive_sol(index, tableau)
+            # check if we can read an initial feasible solution from the tableau
+            feasible_basic_sol = self._read_result(tableau)
+            solutions = list(feasible_basic_sol.values())[:-1] # if it has negative solution
+            if sorted(solutions)[0] < 0:
+                return False
+            else:
+                return True
+
+        if not _detect_sufficiency(tableau):
+            # if the tableau need artificial vars
+            # the number of artificial vars = total number equations CURRENTLY
+            artificial_var_num = len(self.constraints)
+            # append an indentity matrix in the original tableau
+            for i in range(artificial_var_num):
+                tableau.insert(tableau.shape[1]-1, "a_{}".format(i), 0)
+                tableau.iloc[i,-2] = 1
+                # change object row as well to show hand-done arithmetic more clear
+                if self.type == "maximisation":
+                    tableau.iloc[-1,-2] = 10
+                else:
+                    tableau.iloc[-1,-2] = -10
+        return tableau
+    
+    @record_process
+    def _normalize_artificial_column(self, tableau:pd.DataFrame) -> pd.DataFrame:
+        """"
+        make artificial vars column to a unit vector column if it contains artificial vars
+        """
+        # 1. find the position of artificial variables
+        artificial_coulmn_index = []
+        for index, variable in enumerate(list(tableau)):
+            if re.search(r'a', variable):
+                artificial_coulmn_index.append(index)
+        if len(artificial_coulmn_index) > 0:
+            # 2. do pivoting on these positions to make an unit vector column
+            for index, column in enumerate (artificial_coulmn_index):
+                tableau.iloc[-1,:] -= tableau.iloc[index, :]*tableau.iloc[-1,column]
+        return tableau
+    
     def _unit_vector(self, column:pd.DataFrame) -> bool:
         """
         determine if a column is an unit vector
-        This is used to 1. read the result; 2. determine the multiple optimal
+        This is used for 1. reading the result; 2. determining multiple optimal
         """
         modulus = np.linalg.norm(column.to_numpy())
         if modulus != 1.:
@@ -62,9 +125,9 @@ class LP_Solver:
         else:
             return True
 
-    def _read_result(self, tableau:pd.DataFrame, objective_row:np.array) -> dict:
+    def _read_result(self, tableau:pd.DataFrame) -> dict:
         """
-        read one basic solution from the tableau
+        read one basic feasible solution from the tableau
         """
         answer = {}
         for index in range(tableau.shape[1]-1):
@@ -73,15 +136,21 @@ class LP_Solver:
             if not self._unit_vector(current_column):
                 answer["{}".format(tableau.columns[index])] = 0
             else:
-                answer_row = current_column[current_column==1.].index[0]
-                answer["{}".format(tableau.columns[index])] = tableau.iloc[answer_row,-1]
+                answer_row = current_column[current_column !=0].index[0]
+                answer["{}".format(tableau.columns[index])] = tableau.iloc[answer_row,-1] * tableau.iloc[answer_row, index]
         
-        # find the Z value according to the answer of independent variables
-        # reshape objective vector as 1x4 array
-        objective_vector = np.expand_dims(objective_row, axis=0)
-        # reshape answer vector as 4x1 array
+        # find the Z value according to Z = C^T * X
+        # reshape answer vector as nx1 array
         answer_vector = np.array(list(answer.values()))
         answer_vector = np.expand_dims(answer_vector, axis=1)
+
+        # reshape objective vector as 1xn array
+        objective_row = (self.inital_tableau.iloc[-1,:-1]*-1).to_numpy()
+        # solve the length difference problem caused by artificial vars
+        len_difference = len(answer_vector) - len(objective_row)
+        objective_row = np.append(objective_row, [0]*len_difference)
+        objective_vector = np.expand_dims(objective_row, axis=0)
+       
         # Z = C^T * X
         z = np.dot(objective_vector, answer_vector)[0][0]
         answer['z'] = z
@@ -90,7 +159,7 @@ class LP_Solver:
     def _multiple_optimal(self, tableau:pd.DataFrame) -> int:
         """
         Check if the tableau has multiple optimal
-        if yes, return the column index of the other pivot column
+        if yes, return the index of the  pivot column
         if no, return -1 as the flag of impossible
         """
         multiple_optimal_index = -1
@@ -155,9 +224,14 @@ class LP_Solver:
     @record_process
     def single_pivot(self, tableau:pd.DataFrame, multi_opt_index:int):
         def _pivot_column() -> int:
-            # pivot on the column with the most negative element
-            objective_row = tableau.iloc[-1].to_numpy()
-            pivot_column = np.argsort(objective_row)[0]
+            objective_row = tableau.iloc[-1].to_numpy()[:-1]
+            # check if the input is correct, if not, output the hint 
+            assert self.type == "maximisation" or self.type == "minimisation", "please input 'maximisation' or 'minimisation' "
+            # pivot on the column with the most negative/positive element
+            if self.type == "maximisation":
+                pivot_column = np.argsort(objective_row)[0]
+            elif self.type == "minimisation":
+                pivot_column = np.argsort(objective_row)[-1]
             return pivot_column
         
         def _pivot_row(pivot_column:int) -> int:
@@ -175,14 +249,13 @@ class LP_Solver:
             column_index = _pivot_column()
         else:
             column_index = multi_opt_index
+
         row_index = _pivot_row(column_index)
-        
         tableau = tableau.drop(columns=['ratio'])
         pivot_key = tableau.iloc[row_index, column_index]
         # check if the pivot_key is unit 1
         if pivot_key != 1.:
             tableau.iloc[row_index,:] = (tableau.iloc[row_index,:] / pivot_key)
-
         # start pivoting on this column iteratively
         for index, value in enumerate(tableau.iloc[:,column_index]):
             if index == row_index:
@@ -191,12 +264,19 @@ class LP_Solver:
                 tableau.iloc[index,:] -= (tableau.iloc[row_index,:]*tableau.iloc[index,column_index])
 
         # check if the pivot is finished
-        for value in tableau.iloc[-1,:]:
-            if value < 0:
-                done = False
-                break
-            else:
-                done = True 
+        for value in tableau.iloc[-1,:-1]:
+            if self.type == "maximisation":  # for maximisation
+                if value < 0:
+                    done = False
+                    break
+                else:
+                    done = True 
+            else:  # for minimisation
+                if value > 0:
+                    done = False
+                    break
+                else:
+                    done = True 
         return tableau, done
     
     def solve(self):
@@ -204,14 +284,22 @@ class LP_Solver:
         main function to execute algorithm
         """
         answers = []
+        # 1. chaneg inequalities to equalities
         equality_constraints = self._slack_var()
+        # 2. initalize the tableau
         tableau = self.tableau(equality_constraints)
-        objective_row = (tableau.iloc[-1,:-1]*-1).to_numpy()
+        self.inital_tableau = copy.copy(tableau) # store this version tableau
+        # 3. check if artificial variables needed
+        tableau = self._artificial_vars(tableau)
+        # 4. normalize the artificial columns if it contains
+        tableau = self._normalize_artificial_column(tableau)
+
         done = False
         first_done = True
         multi_opt_flag = -1
+
         while not done:
-            # case1: Maximization problem with one solution
+            # case1: normal problem with one solution
             next_tableau, done = self.single_pivot(tableau, multi_opt_flag)
             tableau = next_tableau
             if done:
@@ -223,9 +311,9 @@ class LP_Solver:
                 multi_opt_flag = self._multiple_optimal(tableau)
                 if multi_opt_flag >= 0:
                     # case2: if multiple optimal detected, continue pivoting
-                    answers.append(self._read_result(tableau, objective_row))
+                    answers.append(self._read_result(tableau))
                     done = False
-        answers.append(self._read_result(tableau,objective_row))
+        answers.append(self._read_result(tableau))
         save_answer(answers)
         print("finished!")
 
