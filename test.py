@@ -1,5 +1,5 @@
 import re
+import numpy as np
 
-d = {"x":1,"x_1":3,"y":4}
-a = [1,2,3]
-print(",".join(a))
+a = np.array([1,1])
+print(len(a))

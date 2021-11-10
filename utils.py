@@ -14,7 +14,7 @@ def record_process(func):
         output = func(*args)
         if len(output) != 2:
             with open("log.txt", "a+") as f:
-                f.write("Initial tableau\n")
+                f.write("\nInitial tableau\n")
                 tableau = str(output)
                 f.write(tableau)
                 f.write("\n")

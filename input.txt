@@ -2,8 +2,10 @@ type:
 "maximisation"  
 
 objective_function:
-"3x_1 + 2x_2" 
+"60x_1 + 35x_2 + 20x_3" 
 
 constraints:
-"x_1 <= 5"
-"x_2  <= 4"
+"8x_1 + 6x_2 + x_3 <= 48"
+"4x_1 + 2x_2 + 1.5x_3 <= 20"
+"2x_1 + 1.5x_2 + 0.5x_3 <= 8"
+"x_2 <= 5"
