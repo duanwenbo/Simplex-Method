@@ -4,6 +4,7 @@
 # Time: 10/11/2021
 # File: ultils.py
 
+from os import name
 import re
 import pandas as pd
 import numpy as np
@@ -28,7 +29,7 @@ def record_process(func):
     return wrapper
 
 
-def save_answer(answers):
+def save_answer(answers:list, initial_tableau:pd.DataFrame):
     # initialize the output file:
     # 1. repilcated the question description
     question = ""
@@ -39,6 +40,7 @@ def save_answer(answers):
         f.write(question)
         f.write("\n\n############################ ANSWER ############################\n")
     # 2. indicate the type of the answer
+    # 2.1 multipe optimal
     if len(answers) > 1:
         with open("solution.txt", "a+") as f:
             f.write("\nThis question has -MULTIPLE OPTIMALS-\n")
@@ -58,16 +60,40 @@ def save_answer(answers):
         answer_1 = " , ".join(str(v) for v in solutions[0].values())
         answer_2 = " , ".join(str(v) for v in solutions[1].values())
         with open("solution.txt", "a+") as f:
-            f.write("\n\nTherefore, the final solution is\n({}) = C({}) + (1-C)({})\nIn which 0 <= C <= 1".format(variables_str, answer_1, answer_2))
+            f.write("\n\nTherefore, the final solution is\n({}) = C({}) + (1-C)({})\nIn which 0 <= C <= 1\n".format(variables_str, answer_1, answer_2))
+    # 2.2 single solution
     else:
          with open("solution.txt", "a+") as f:
             df = pd.DataFrame(answers[0], index=["answer"])
             f.write(str(df))
+            f.write("\n")
+
             
     # inidcate the type of variables
     df = pd.DataFrame(answers[0], index=["answer"])
     variables = " ".join(list(df))
-    original_variables = ",".join(re.findall(r'x_\d', variables))
-    slack_variables = ",".join(re.findall(r's_\d', variables))
+    # the order of variable analysis output is PREDEFIND !
+    name_list =  ["original variables", "slack variables", "surplus variables", "artificial variables"]
+    var_analysis = []
+    var_analysis.append(re.findall(r'x_\d', variables))
+    slack_variables, surplus_variables = [], []
+    for var in list(initial_tableau):
+        if re.search(r's_', var):
+            if initial_tableau[var].sum() == 1:
+               
+                slack_variables.append(var)
+            elif initial_tableau[var].sum() == -1:
+                surplus_variables.append(var)
+            else:
+                a = initial_tableau[var].sum()
+                raise AttributeError
+    var_analysis.append(slack_variables)
+    var_analysis.append(surplus_variables)
+    var_analysis.append(re.findall(r'a_\d', variables))
+
+    assert len(name_list) == len(var_analysis), 'check your answer!'
+
     with open("solution.txt", "a+") as f:
-        f.write("\n\nwhere:\noriginal variables: {}\nslack variables: {}".format(original_variables, slack_variables))
+        for index, var in enumerate(var_analysis):
+            if len(var) >0:
+                f.write("\n{} : {}".format(name_list[index],",".join(var)))

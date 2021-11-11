@@ -314,7 +314,7 @@ class LP_Solver:
                     answers.append(self._read_result(tableau))
                     done = False
         answers.append(self._read_result(tableau))
-        save_answer(answers)
+        save_answer(answers, self.inital_tableau)
         print("finished!")
 
 
