@@ -13,18 +13,13 @@ pd.set_option('display.max_columns', None)
 def record_process(func):
     def wrapper(*args):
         output = func(*args)
-        if len(output) != 2:
-            with open("log.txt", "a+") as f:
-                f.write("\nInitial tableau\n")
-                tableau = str(output)
-                f.write(tableau)
-                f.write("\n")
+        if len(output) != 3:
+            table, process = output
         else:
-            with open("log.txt", "a+") as f:
-                f.write("\nnext pivot\n")
-                tableau = str(output[0])  
-                f.write(tableau)
-                f.write("\n")
+            table,_,process = output
+        with open("log.txt", "a+") as f:
+            f.write("\n{}\n".format(process))
+            f.write("{}\n\n".format(str(table)))
         return output
     return wrapper
 

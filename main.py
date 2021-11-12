@@ -8,5 +8,5 @@ def optimize(question_path):
     lp_solver.solve()
 
 if __name__ == "__main__":
-    question_path = 'miniproject.txt'
+    question_path = 'input.txt'
     optimize(question_path)

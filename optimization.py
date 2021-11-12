@@ -4,6 +4,7 @@
 # Time: 25/10/2021
 # File: Optimization.py
 
+from pandas.core.reshape.pivot import pivot
 from initalization import extract_info
 from utils import record_process, save_answer
 import pandas as pd
@@ -62,7 +63,9 @@ class LP_Solver:
         def _positive_sol(negative_row:int, tableau:pd.DataFrame):
             # ensure the solution column is positive, try to find an initial feasiable solution 
             tableau.iloc[negative_row,:] *= -1
-            return tableau
+
+            process = "({0})--> -({0})".format(negative_row)
+            return tableau, process
         
         # check if the initial tabeau is sufficient or not to get a feasible solution
         def _detect_sufficiency(tableau:pd.DataFrame):
@@ -75,7 +78,7 @@ class LP_Solver:
             # if it contains, regulate the related solution to positive
             if len(negative_sol_index) > 0:
                 for index in negative_sol_index:
-                    tableau = _positive_sol(index, tableau)
+                    tableau = _positive_sol(index, tableau)[0]
             # check if we can read an initial feasible solution from the tableau
             feasible_basic_sol = self._read_result(tableau)
             solutions = list(feasible_basic_sol.values())[:-1] # if it has negative solution
@@ -103,7 +106,9 @@ class LP_Solver:
                     tableau.iloc[-1,-2] = 10
                 else:
                     tableau.iloc[-1,-2] = -10
-        return tableau
+
+        process = "add artificial variables"
+        return tableau, process
     
     @record_process
     def _normalize_artificial_column(self, tableau:pd.DataFrame) -> pd.DataFrame:
@@ -119,7 +124,8 @@ class LP_Solver:
             # 2. do pivoting on these positions to make an unit vector column
             for index, column in enumerate (artificial_coulmn_index):
                 tableau.iloc[-1,:] -= tableau.iloc[index, :]*tableau.iloc[-1,column]
-        return tableau
+        process = "normalize artificial vars in row({})".format(len(tableau)-1)
+        return tableau, process
     
     def _unit_vector(self, column:pd.DataFrame) -> bool:
         """
@@ -196,7 +202,7 @@ class LP_Solver:
         return non_basic_vars_index
     
     @record_process
-    def tableau (self, equality_constraints:list) -> pd.DataFrame:
+    def tableau(self, equality_constraints:list) -> pd.DataFrame:
         """
         create a standard tableau for LP optimization
         """
@@ -226,7 +232,9 @@ class LP_Solver:
         coefficient = [ (-i if i != 0.0 else i) for i in coefficient]
         coefficient.append(0.)
         df.loc[df.shape[0]] = coefficient
-        return df
+
+        process = "Initalize tableau"
+        return df, process
     
     @record_process
     def single_pivot(self, tableau:pd.DataFrame, multi_opt_index:int):
@@ -251,23 +259,32 @@ class LP_Solver:
             picking_position = default_picking_position + negative_num
             pivot_row = np.argsort(tableau['ratio'].to_numpy())[picking_position]
             return pivot_row
+        
+        @record_process
+        def _normalize(tableau:pd.DataFrame):
+            "normalize pivot row before pivoting"
+            tableau.iloc[row_index,:] = (tableau.iloc[row_index,:] / pivot_key)
+            process= "normalize row({})".format(row_index)
+            return tableau, process
 
         if multi_opt_index == -1:
             column_index = _pivot_column()
         else:
             column_index = multi_opt_index
-
+        
+        process = []
         row_index = _pivot_row(column_index)
         tableau = tableau.drop(columns=['ratio'])
         pivot_key = tableau.iloc[row_index, column_index]
         # check if the pivot_key is unit 1
         if pivot_key != 1.:
-            tableau.iloc[row_index,:] = (tableau.iloc[row_index,:] / pivot_key)
+            tableau = _normalize(tableau)[0]
         # start pivoting on this column iteratively
         for index, value in enumerate(tableau.iloc[:,column_index]):
             if index == row_index:
                 pass
             else:
+                process.append("({0})--> ({0})-({1})*{2}".format(index, row_index, tableau.iloc[index,column_index]))
                 tableau.iloc[index,:] -= (tableau.iloc[row_index,:]*tableau.iloc[index,column_index])
 
         # check if the pivot is finished
@@ -283,8 +300,9 @@ class LP_Solver:
                     done = False
                     break
                 else:
-                    done = True 
-        return tableau, done
+                    done = True
+        process = " || ".join(process) 
+        return tableau, done, process
     
     def solve(self):
         """
@@ -294,12 +312,12 @@ class LP_Solver:
         # 1. chaneg inequalities to equalities
         equality_constraints = self._slack_var()
         # 2. initalize the tableau
-        tableau = self.tableau(equality_constraints)
+        tableau = self.tableau(equality_constraints)[0]
         self.inital_tableau = copy.copy(tableau) # store this version tableau
         # 3. check if artificial variables needed
-        tableau = self._artificial_vars(tableau)
+        tableau = self._artificial_vars(tableau)[0]
         # 4. normalize the artificial columns if it contains
-        tableau = self._normalize_artificial_column(tableau)
+        tableau = self._normalize_artificial_column(tableau)[0]
 
         done = False
         first_done = True
@@ -307,7 +325,7 @@ class LP_Solver:
 
         while not done:
             # case1: normal problem with one solution
-            next_tableau, done = self.single_pivot(tableau, multi_opt_flag)
+            next_tableau, done,_ = self.single_pivot(tableau, multi_opt_flag)
             tableau = next_tableau
             if done:
                 # for the first time, record non-basic varible column position
