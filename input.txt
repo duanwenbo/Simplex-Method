@@ -2,9 +2,9 @@ type:
 "maximisation"  
 
 objective_function:
-"60x_1 + 90x_2 + 300x_3"
+"3x_1 + 5x_2" 
 
 constraints:
-"x_1 + x_2 + x_3 <= 600"
-"x_1 + 3x_2 <= 600"
-"2x_1 + x_3 <= 900"
+"x_1 <= 4"
+"2x_2 <= 12"
+"3x_1 + 2x_2 = 18"

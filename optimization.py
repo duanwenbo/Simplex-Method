@@ -66,6 +66,7 @@ class LP_Solver:
         
         # check if the initial tabeau is sufficient or not to get a feasible solution
         def _detect_sufficiency(tableau:pd.DataFrame):
+            sufficieny = True
             # find if the solution column contains negative or not
             negative_sol_index = []
             for index, num in enumerate(tableau.solution.to_list()):
@@ -79,9 +80,15 @@ class LP_Solver:
             feasible_basic_sol = self._read_result(tableau)
             solutions = list(feasible_basic_sol.values())[:-1] # if it has negative solution
             if sorted(solutions)[0] < 0:
-                return False
+                sufficieny = False
             else:
-                return True
+                sufficieny = True
+            
+            for constraint in self.constraints:
+                if re.search(r'[^\>\<]\=', constraint):
+                    sufficieny = False
+            
+            return sufficieny
 
         if not _detect_sufficiency(tableau):
             # if the tableau need artificial vars
