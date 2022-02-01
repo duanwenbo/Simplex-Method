@@ -1,6 +1,3 @@
--- Author: Wenbo Duan
--- Email: pv19120@bristol.ac.uk
-
 ################################################
 1. Environment used:
 - Python 3.8
